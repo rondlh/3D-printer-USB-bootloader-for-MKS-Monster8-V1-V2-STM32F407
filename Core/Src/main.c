@@ -119,8 +119,8 @@ UART_HandleTypeDef huart1;
 FATFS    FatFs;                       // FAT File System handle
 FIL      fwFile;                      // File handle for the firmware file
 FRESULT  result;		              // File operation result
-uint32_t appSize;		              // User application size in bytes
-uint8_t  appBuffer[FILE_BUFFER_SIZE]; // File read buffer
+uint32_t fileSize;		              // User application size in bytes
+uint8_t  fileBuffer[FILE_BUFFER_SIZE] __attribute__((aligned(4))); // File read buffer
 
 extern ApplicationTypeDef Appli_state;
 extern HCD_HandleTypeDef* hUsbHostHS;
@@ -286,14 +286,14 @@ uint32_t compareFlashToFile(void)
     int different = 0;
     unsigned int bytesRead;
 
-	while ((i < appSize) && !result)
+	while ((i < fileSize) && !result)
 	{
-		result = f_read(&fwFile, appBuffer, FILE_BUFFER_SIZE, &bytesRead);
-		file_crc32 = crc32b(~file_crc32, appBuffer, bytesRead);
+		result = f_read(&fwFile, fileBuffer, FILE_BUFFER_SIZE, &bytesRead);
+		file_crc32 = crc32b(~file_crc32, fileBuffer, bytesRead);
 		j = 0;
 		while ((j < bytesRead) && !result)
 		{
-			if (*(__IO char*)(FLASH_USER_START_ADDR + i + j) != appBuffer[j])
+			if (*(__IO char*)(FLASH_USER_START_ADDR + i + j) != fileBuffer[j])
 				difference_found = 1;
 			j++;
 		}
@@ -352,7 +352,7 @@ int CopyFileToFlashMemory(void)
 	HAL_FLASH_Unlock();
 	FRESULT result = f_lseek(&fwFile, 0);
 
-	while ((erasedSize < appSize) && !result)
+	while ((erasedSize < fileSize) && !result)
 	{
 		uart_printf("Erasing flash sector %u  Sector size: %3uKB\r\n", sector, flash_sector_size >> 10);
 		FLASH_Erase_Sector(sector, FLASH_VOLTAGE_RANGE_3);
@@ -368,19 +368,19 @@ int CopyFileToFlashMemory(void)
 	uint32_t file_crc32 = ~CRC32_START; // Invert here, will be undone in crc32b
 	unsigned int bytesRead;
 
-	while ((byteCounter < appSize) && !result)
+	while ((byteCounter < fileSize) && !result)
 	{
-		result = f_read(&fwFile, appBuffer, FILE_BUFFER_SIZE, &bytesRead);
-		file_crc32 = crc32b(~file_crc32, appBuffer, bytesRead);
+		result = f_read(&fwFile, fileBuffer, FILE_BUFFER_SIZE, &bytesRead);
+		file_crc32 = crc32b(~file_crc32, fileBuffer, bytesRead);
 
 		if (bytesRead < FILE_BUFFER_SIZE) // Add some "erased flash" bytes to the buffer
-			memset(appBuffer + bytesRead, 0xFF, (FILE_BUFFER_SIZE - bytesRead) % FLASHWORD);
+			memset(fileBuffer + bytesRead, 0xFF, (FILE_BUFFER_SIZE - bytesRead) % FLASHWORD);
 
 		// Write the data to flash memory
 		i = 0;
 		while ((i < bytesRead) && !result)
 		{
-			result = HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_USER_START_ADDR + byteCounter + i, *((volatile uint32_t*)(appBuffer + i)));
+			result = HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_USER_START_ADDR + byteCounter + i, *((volatile uint32_t*)(fileBuffer + i)));
 			i += FLASHWORD;
 		}
 		byteCounter += bytesRead;
@@ -391,7 +391,7 @@ int CopyFileToFlashMemory(void)
 
 	if (!result) // All went OK, verify flash contents
 	{
-		uint32_t flash_crc32 = crc32b(CRC32_START, (uint8_t*)FLASH_USER_START_ADDR, appSize);
+		uint32_t flash_crc32 = crc32b(CRC32_START, (uint8_t*)FLASH_USER_START_ADDR, fileSize);
 		if (file_crc32 != flash_crc32)
         {
 			uart_printf("* Verify failed\r\n");
@@ -545,7 +545,7 @@ int main(void)
         }
         uart_printf(" opened successfully\r\n");
 
-        appSize = f_size(&fwFile);
+        fileSize = f_size(&fwFile);
 
         // Get device flash size from memory (in KBytes)
         __IO uint16_t flashSize = *(uint32_t*)(FLASHSIZE_BASE);
@@ -554,9 +554,9 @@ int main(void)
         uint32_t freeFlash = (flashSize << 10) - FLASH_BOOTLOADER_SIZE;
         uart_printf("Free flash memory space: %uKB\r\n", freeFlash >> 10);
 
-        uart_printf("Firmware update size: %uKB\r\n", appSize >> 10);
+        uart_printf("Firmware update size: %uKB\r\n", fileSize >> 10);
 
-        if (appSize > freeFlash)
+        if (fileSize > freeFlash)
         {
         	uart_printf("ERROR: Insufficient free flash memory space, aborting\r\n");
             f_close(&fwFile); // Not strictly needed, comment out to save some flash space
