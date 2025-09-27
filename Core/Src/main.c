@@ -524,8 +524,6 @@ int main(void)
     if (HAL_GetTick() > 2500) // Requires about 1200-2200ms
         goto USER_APP;
 
-    HAL_Delay(1);
-
     if (Appli_state == APPLICATION_READY)
     {
         // Mount the FAT file system
